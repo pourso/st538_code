@@ -18,7 +18,7 @@ or_sm <- read.csv(unz("csv_por.zip", "ss12por.csv"),
 str(or_sm)
 
 # or extract and read in parts
-unzip("csv_por.zip", exdir = "data/")
+unzip("csv_por.zip", exdir = "data")
 or_sm <- read.csv("data/ss12por.csv", nrows = 10,
                   stringsAsFactors = FALSE)
 str(or_sm)
