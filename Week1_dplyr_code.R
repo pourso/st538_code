@@ -1,6 +1,7 @@
 
 library(dplyr)
 library(hflights)
+library(magrittr)
 ??hflights
 ??dplyr
 
@@ -102,5 +103,9 @@ detach(hflights_df)
 # What if we want to compare the average flight delays by month for the last 20 years
 # between Houston and Atlanta?
 #
-
+hflights_df %>%
+  filter(Dest=='ATL', Year>=2002) %>%
+  select(Month, ArrDelay) %>%
+  group_by(Month) %>%
+  summarize(avg_delay = mean(ArrDelay, na.rm=T))
 
