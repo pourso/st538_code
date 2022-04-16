@@ -1,0 +1,214 @@
+---
+title: "st538 Project 1 Week 3"
+author: "Philip Ourso"
+date: "4/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo=F, message=F, warning=F}
+library(tidyverse)
+library(GGally)
+```
+
+## Project \#1 - Interim Report  
+  
+  After accounting for gender, educational attainment and typical hours worked last week, is there an effect of state residency on total person's income in the Pacific Northwest states of Washington, Oregon and Idaho?  
+  The dataset used included 5-year PUMS data for the states of Washington, Oregon and Idaho, for years 2015-2019. Income and housing cost variables were adjusted with the appropriate adjustment factor and string data were recoded in some cases for convenience.   
+  Specific variables include:   
+  - PINCP: total person's income  
+  - MRGP:   
+  - SMOCP: selected monthly owner costs  
+  - HINCP: household income  
+  - WKHP: usual hours worked per week  
+  - SPORDER: person number  
+  - RNTP: monthly rent  
+  - AGEP: age  
+  - SEX: gender  
+  - SCHL: educational attainment  
+  
+### Exploratory data analysis  
+  
+```{r, echo=F, message=F, warning=F}
+# read data
+df = read.csv(unz("ACSPUMS5Y2019_2022-04-15T162823.zip",
+                  "ACSPUMS5Y2019_2022-04-15T140844.csv"
+                  ), header = T)
+dim(df)
+head(df,20)
+
+# char's adding col to end?
+df = subset(df, select=-c(X))
+colnames(df)
+
+# check for missing
+df[is.na(df),]
+
+# 
+as_tibble(df)
+
+# recode state as string
+df$state = ifelse(df$ST == 16, "ID",
+                  ifelse(df$ST == 41, "OR",
+                         "WA"
+                  )
+                  )
+df$gender = ifelse(df$SEX==1, "Male", "Female")
+
+# adjust for inflation
+df = df %>% 
+  mutate(pincp_adj = PINCP*ADJINC,
+         smocp_adj = SMOCP*ADJHSG,
+         rntp_adj = RNTP*ADJHSG
+         )
+```
+  
+```{r, echo=F, message=F, warning=F}
+
+# univariate distributions
+
+# unadjusted box plots
+ggplot(df, aes(x=factor(ST), y=PINCP)) +
+  geom_boxplot(aes(group=ST)) +
+  theme_minimal()
+
+# adjusted income by state
+ggplot(df, aes(x=factor(state), y=pincp_adj)) +
+  geom_boxplot(aes(group=state), varwidth=T, outlier.alpha=0.1) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "State",
+    y = "Adjusted Income",
+    title = "Adjusted income by PacNW state"
+  )
+
+# adjusted income by state
+ggplot(df, aes(x=pincp_adj)) +
+  geom_density(aes(color=factor(state))
+                 ) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    y = "Density",
+    x = "Adjusted Income",
+    title = "Adjusted income by PacNW state"
+  )
+
+# adjusted income by gender
+ggplot(df, aes(x=factor(SEX), y=pincp_adj)) +
+  geom_boxplot(aes(group=SEX), varwidth=T, outlier.alpha=0.1) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "State",
+    y = "Adjusted Income",
+    title = "Adjusted income by gender"
+  )
+
+# adjusted income by gender
+ggplot(df, aes(x=AGEP, y=pincp_adj)) +
+  geom_hex() +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "Age",
+    y = "Adjusted Income",
+    title = "Adjusted income by age"
+  )
+
+# adjusted income by age
+ggplot(df, aes(x=AGEP, y=pincp_adj)) +
+  geom_point(alpha=0.1) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "Age",
+    y = "Adjusted Income",
+    title = "Adjusted income by age"
+  )
+
+# adjusted income by hours/ week
+ggplot(df, aes(x=WKHP, y=pincp_adj)) +
+  geom_point(alpha=0.1) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "Age",
+    y = "Adjusted Income",
+    title = "Adjusted income by age"
+  )
+
+# correlation matrix/ pairs
+
+```
+  
+```{r, echo=F, message=F, warning=F}
+
+ggpairs(subset(df[sample(nrow(df),10000),], 
+               select = c(pincp_adj, state, gender, AGEP, SCHL, WKHP, smocp_adj, rntp_adj))) +
+  theme(
+    axis.text.x = element_text(angle=90)
+  )
+
+
+#pairs(subset(df[sample(nrow(df),1000),], select = -c(SERIALNO)))
+```   
+  
+```{r, echo=F, message=F, warning=F}
+# consider log transformations of continuous vars
+df.log = subset(df, select=c(pincp_adj, state, gender, AGEP, SCHL, WKHP, smocp_adj, rntp_adj))
+df.log = df.log %>%
+  mutate(pincp_adj.log = log(pincp_adj),
+         AGEP.log = log(AGEP),
+         smocp_adj.log = log(smocp_adj),
+         WKHP.log = log(WKHP),
+         rntp_adj.log = log(rntp_adj),
+         )
+
+ggpairs(subset(df.log[sample(nrow(df),10000),], 
+               select = c(pincp_adj, AGEP, WKHP, smocp_adj, rntp_adj,
+                          pincp_adj.log, AGEP.log, WKHP.log, smocp_adj.log, rntp_adj.log))) +
+  theme(
+    axis.text.x = element_text(angle=90)
+  )
+
+
+#pairs(subset(df[sample(nrow(df),1000),], select = -c(SERIALNO)))
+```    
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
