@@ -380,6 +380,7 @@ ggplot(tb, aes(x = p,y = bic)) +
 coef(regfit.full, 12)
 
 ```
+  
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 lm.full = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
 summary(lm.full)
@@ -401,10 +402,74 @@ lm.full.log = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_a
 summary(lm.full.log)
 ```
   
+```{r, echo=FALSE, warning=FALSE, message=FALSE}  
+df.tmp = df.red %>%
+  mutate(
+    WKHP.log = log(WKHP),
+    AGEP.log = log(AGEP),
+    WAGP.log = log(wagp_adj)
+  ) 
+
+
+regfit.test = regsubsets(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp, nvmax=20)
+reg.summary.tmp = summary(regfit.test)
+
+
+tb.tmp = tibble(
+  p = 1:length(reg.summary.tmp$rsq),
+  rsq = reg.summary.tmp$rsq,
+  rss = reg.summary.tmp$rss,
+  adjr2 = reg.summary.tmp$adjr2,
+  cp = reg.summary.tmp$cp,
+  bic = reg.summary.tmp$bic,
+)
+
+# adjusted R^2
+ggplot(tb.tmp, aes(x = p,y = adjr2)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.max( reg.summary.tmp$adjr2 ),], 
+             mapping=aes(x = p,y = adjr2),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Adjusted R^2",
+    title = paste("Best adjusted R^2 occurs at p==", toString(which.max( reg.summary.tmp$adjr2 )))
+  )
+
+# adjusted Cp
+ggplot(tb.tmp, aes(x = p,y = cp)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$cp ),], 
+             mapping=aes(x = p,y = cp),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted Cp occurs at p==", toString(which.min( reg.summary.tmp$cp )))
+  )
+
+# adjusted Cp
+ggplot(tb.tmp, aes(x = p,y = bic)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$bic ),], 
+             mapping=aes(x = p,y = bic),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted BIC occurs at p==", toString(which.min( reg.summary.tmp$bic )))
+  )
+
+coef(regfit.full, 13)
+
+```  
+  
 ### Model diagnostics    
   
   Proceeding with the full model identified by best subset selection, model diagnostics reveal large residual errors with extreme deviation from normality, indicating a violation of the assumptions of linear regression. The plot of residual error against fitted value shows several concerning issues: a large percentage of the population has residual errors of hundreds of thousands of dollars, predicted wages are negative for a subset of the population and there is a downward trend indicating that the residual error becomes negative as fitted values become larger.   
   Plots of residuals against explanatory variables reveal further concerning trends, as the constant variance assumption appears to be violated, particularly at the lower and upper values of the predictors. Lastly, the QQ-plot exhibits an extreme departure from normality at upper quantiles.  
+  
+  Returning to model definition, response is instead modeled as the logarithm of wages and the logarithm of continuous predictors is include in best subset selection. Using the logarithm of wages earned results in a higher adjusted R^2, although logarithms of predictors aren't included in the optimal subset. Repeating model diagnostics continues to reveal model issues: while deviation from normality assumption is somewhat reduced, there is clearly non-constant variance at higher values of explanatory variables and residuals continue to be large.    
   
 ```{r, echo=FALSE, warning=FALSE, message=FALSE}
 # residual vs fitted
@@ -424,9 +489,35 @@ qplot(sample = df.red.fort$.resid) + stat_qqline()
 
 ```
   
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
+summary(lm.test)
+
+# check reduced model
+
+# residual vs fitted
+df.tmp.fort = fortify(lm.test, df.tmp)
+qplot(.fitted, .resid, data=df.tmp.fort)
+
+# residual vs explanatory
+qplot(AGEP, .resid, data = df.tmp.fort) 
+qplot(WKHP, .resid, data = df.tmp.fort) 
+#qplot(WKWN, .resid, data = df.red.fort) 
+qplot(smocp_adj, .resid, data = df.tmp.fort) 
+qplot(rntp_adj, .resid, data = df.tmp.fort) 
+#multiplot(p1, p2, p3, p4, p5, cols=5)
+
+# qqplot
+qplot(sample = df.tmp.fort$.resid) + stat_qqline() 
+
+```  
+  
+  
 ### Conclusion  
   
   Clearly the model, as identified by best subset selection and fitted by multiple linear regression, exhibits several serious violations of assumptions. For completeness sake, in order to answer the question posited at the outset, a linear regression model is fit with all previously included explanatory variables and Pacific Northwest state, as a factor. Reviewing the results from this new model indicates that, with respect to Idaho residency as a baseline, only Washington residency is found to be significant at a p-value < 0.0001. The coefficient for the Washington indicator is estimated to be 5.45, indicating a non-trivial impact upon wages (in thousands of dollars).  
+  Even with the obvious improvement from modeling the logarithm of wages earned, serious issues remain. Including state information in the model with the logarithm response now results in the statistical significance of both Oregon and Washington residency with respect to Idaho residency. Oregon residency is estimated to correspond to roughly 9% higher wages, while Washington residency approaches 20% higher wages.  
   
 ```{r, echo=False, message=FALSE, warning=FALSE}  
 df.red.state = subset(df, 
@@ -435,5 +526,13 @@ lm.full.state = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj 
 summary(lm.full.state)  
 
 ```  
+  
+```{r, echo=False, message=FALSE, warning=FALSE}  
+df.red.state.tmp = subset(df, 
+                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
+lm.full.state.tmp = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state.tmp)
+summary(lm.full.state.tmp)  
 
+```  
+  
 
