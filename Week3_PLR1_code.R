@@ -9,9 +9,15 @@ X <- as.matrix(fat[, 9:18])
 y <- as.numeric(fat[, 1])
 
 ##### Lasso Estimates
-lasso <- glmnet(X, y)
+
+# lasso regression 
+lasso <- glmnet(X, y) 
+
+# plot of L1 penalty vs coeff estimates
 plot(lasso)
 
+# k-fold cross validation, returns lambda tuning param
+# lambda balances RSS and L1 penalty term 
 lasso.cv <- cv.glmnet(X, y)
 lasso1 <- glmnet(X, y, lambda = lasso.cv$lambda.min)
 lasso1$beta
