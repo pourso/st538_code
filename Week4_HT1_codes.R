@@ -1,4 +1,8 @@
 ################### Simulated Data ############################################
+# two datasets:
+# 1. rand data from normal dist w/ same mean, std
+# 2. rand data from normal dist, half w/ mean 0, half w/ mean 0.25
+
 
 # Data where all null hypotheses are true
 # So No null hypotheses should be rejected
@@ -22,6 +26,7 @@ s0 <- 1
 for(j in 1:p) {
   x1[,j] <- rnorm(n, mu0[j], s0)
 }
+
 # False null hypothesis tests or true alternative hypotheses
 tr <- rep(0, p*(p-1)/2)
 l <- 0
@@ -50,12 +55,16 @@ for(j in 1:(p-1)) {
   }
 }
 
+# ~0.067 of t-tests on "like mean" dataset falsely reject H0
+
 # Histogram of the 1225 hypothesis tests for the first dataset
 hist(tt, breaks=50)
 abline(v=al, col=2, lwd=2)
 rej_t <- (tt <= al)   # which tests are being rejected
 sum(rej_t)   # Number of rejected tests
 # Note that number of rejected tests should be close to or less than al*p*(p-1)/2
+
+# ~0.23 of t-tets on "diff mean" dataset rejected, but half differ in mean?
 
 # Histogram of the 1225 hypothesis tests for the second dataset
 hist(tt1, breaks=50)
@@ -64,8 +73,11 @@ rej_t <- (tt1 <= al)   # which tests are being rejected
 sum(rej_t)   # Number of rejected tests
 # Note that number of rejected tests is close to or less than (p/2)^2
 
+# how many times did we reject H0 for "like mean" data?
+# ~0.057 FDR
+
 tr_discov <- tr*rej_t
-sum(tr_discov) # Number of true rejections 
+sum(tr_discov) # Number of true rejections (should be diff, found to be diff)
 false_discov <- (1 - tr)*rej_t
 sum(false_discov) # Number of false rejections 
 fdr <- sum(false_discov)/sum(rej_t)  # False discovery rate
@@ -76,6 +88,8 @@ fdr
 
 m <- (p*(p-1)/2)   # Number of tests
 
+# Bonferroni uses very small individual alpha
+
 hist(tt, breaks=50)
 abline(v=al/m, col=2, lwd=2)
 # which tests are being rejected with Bonferroni cut-off
@@ -83,12 +97,16 @@ rej_bon <- (tt <= al/m)
 sum(rej_bon)   # Number of rejected tests with Bonferroni cut-off
 # Note that number of rejected tests should be quite small
 
+# only one test from "diff mean" data is rejected
+
 hist(tt1, breaks=50)
 abline(v=al/m, col=2, lwd=2)
 # which tests are being rejected with Bonferroni cut-off
 rej_bon <- (tt1 <= al/m)  
 sum(rej_bon)   # Number of rejected tests with Bonferroni cut-off
 # Note that number of rejected tests is much less than true number (p/2)^2 = 625
+
+# no false discoveries 
 
 tr_discov <- tr*rej_bon
 sum(tr_discov) # Number of true rejections 
@@ -98,6 +116,8 @@ fdr <- sum(false_discov)/sum(rej_bon)  # False discovery rate
 fdr
 
 ################### Sidak cutoff ############################################
+
+# Sidak and Bonferroni nearly agree
 
 a_sid <- 1 - (1 - al)^(1/m)
 # Comparison between Sidak and Bonferroni cut-off
@@ -119,6 +139,8 @@ sum(rej_sid)  # Number of rejected tests with Sidak cut-off
 # Note that number of rejected tests is much less than true number (p/2)^2 = 625
 
 ################### Tukey's HSD cutoff ############################################
+
+# Tukey's cutoff shows marginal improvement in true discoveries
 
 data1 <- data.frame(res = as.vector(x), 
                     gr = as.factor(kronecker(1:50, rep(1, 100))))
@@ -155,6 +177,9 @@ sum(rej_h)  # Number of rejected tests with Holm's method
 # But slightly higher than Bonferroni cut-off
 
 ################### Benjamini-Hochberg Procedure #################################
+
+# more true rejections, but still nowhere near "diff mean" pop
+# FDR is ~0.02, much better than w/ no control
 
 q <- 0.05  # False discovery rate control
 p.adj.bh <- p.adjust(tt, "BH")
