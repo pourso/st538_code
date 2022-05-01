@@ -36,7 +36,7 @@ sa.HeartDisease<-read.table(
 
 ################## Handwritten Digit Recognition Data ######################
 
-digit = read.table('Digit_recog_train.txt')
+digit = read.table('Week4_Digit_recog_train.txt')
 # Response
 digit_no = digit[,1]
 # Predictors
@@ -153,20 +153,25 @@ y <- as.factor(digit_no.tr13)
 glm_digit = glmnet(X, y, family = "binomial")
 plot(glm_digit)
 glm_digit.cv <- cv.glmnet(X, y, family = "binomial")
+
 # Finding the coefficient estimates for lambda with 
 # minimum cross-validation error
 glm_digit1 <- glmnet(X, y, family = "binomial", lambda = glm_digit.cv$lambda.min)
 glm_digit1$beta
+
 # Finding the for largest lambda within 1 std. dev. of 
 # minimum cross-validation error
 glm_digit2 <- glmnet(X, y, family = "binomial", lambda = glm_digit.cv$lambda.1se)
 glm_digit2$beta
+
 # Fitted values
 res = predict(glm_digit1, as.matrix(digit_pix.test13), type = 'response')
 res[res > 0.5] = 1
 res[res <= 0.5] = 0
+
 # Misclassification errors in the training data
 table(digit_no.test13, res)
+
 # Predicted values
 res = predict(glm_digit2, as.matrix(digit_pix.test13), type = 'response')
 res[res > 0.5] = 1
@@ -181,14 +186,17 @@ glm.sim1 = glmnet(X, y, family = "binomial")
 plot(glm.sim1)
 
 glm.sim1.cv <- cv.glmnet(X, y, family = "binomial")
+
 # Finding the coefficient estimates for lambda with 
 # minimum cross-validation error
 glm.sim11 <- glmnet(X, y, family = "binomial", lambda = glm.sim1.cv$lambda.min)
 glm.sim11$beta
+
 # Finding the for largest lambda within 1 std. dev. of 
 # minimum cross-validation error
 glm.sim12 <- glmnet(X, y, family = "binomial", lambda = glm.sim1.cv$lambda.1se)
 glm.sim12$beta
+
 # Fitted values
 res = predict(glm.sim11, X, type = 'response')
 res[res > 0.5] = 1
@@ -209,14 +217,17 @@ glm.sim2 = glmnet(X, y, family = "binomial")
 plot(glm.sim2)
 
 glm.sim2.cv <- cv.glmnet(X, y, family = "binomial")
+
 # Finding the coefficient estimates for lambda with 
 # minimum cross-validation error
 glm.sim21 <- glmnet(X, y, family = "binomial", lambda = glm.sim2.cv$lambda.min)
 glm.sim21$beta
+
 # Finding the for largest lambda within 1 std. dev. of 
 # minimum cross-validation error
 glm.sim22 <- glmnet(X, y, family = "binomial", lambda = glm.sim2.cv$lambda.1se)
 glm.sim22$beta
+
 # Fitted values
 res = predict(glm.sim22, X, type = 'response')
 res[res > 0.5] = 1

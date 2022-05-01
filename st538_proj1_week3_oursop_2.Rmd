@@ -1,0 +1,598 @@
+---
+title: "st538 Project 1 Week 3"
+author: "Philip Ourso"
+date: "4/13/2022"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo=F, message=F, warning=F, include=F}
+library(tidyverse)
+library(GGally)
+library(leaps)
+#library(graphics)
+library(Rmisc)
+
+
+# copied from: Week2_LR2_code.R
+if(! (packageVersion("ggplot2") >= "2.0.0")) {
+  stop("This version of stat_qqline require ggplot2 version 2.0.0 or greater")
+}
+
+StatQQLine <- ggproto("StatQQLine", Stat,
+                      compute_group = function(data, scales, distribution = qnorm, dparams = list()) {
+                        data <- remove_missing(data, na.rm = TRUE, "sample", name = "stat_qqline")
+                        y <- quantile(data$sample, c(0.25, 0.75))
+                        x <- do.call(distribution, c(list(p = c(0.25, 0.75)), dparams))
+                        slope <- diff(y)/diff(x)
+                        int <- y[1L] - slope * x[1L]
+                        data.frame(slope = slope, intercept = int)
+                      },
+                      
+                      required_aes = c("sample")
+)
+
+stat_qqline <- function(mapping = NULL, data = NULL, geom = "abline",
+                        position = "identity", na.rm = FALSE, show.legend = NA,
+                        distribution = qnorm, dparams = list(),
+                        inherit.aes = TRUE, ...) {
+  layer(
+    stat = StatQQLine, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, distribution = distribution, dparams = dparams, ...)
+  )
+}
+```
+
+## Project \#1 - Interim Report  
+  
+  After accounting for gender, race, educational attainment and typical hours worked, is there an effect of state residency on total person's income in the Pacific Northwest states of Washington, Oregon and Idaho?  
+  
+  The dataset used included 5-year PUMS data for the states of Washington, Oregon and Idaho, for years 2015-2019. Income and housing cost variables were adjusted and string data were recoded in some cases for convenience.   
+  Specific variables include:   
+  - ESR: employment status  
+  - SEX: gender  
+  - MRGP: mortgage payment amount  
+  - COW: class of worker  
+  - AGEP: age  
+  - RAC1P: race  
+  - SCHL: educational attainment  
+  - WKHP: usual hours worked per week  
+  - SMOCP: selected monthly owner costs  
+  - WAGP: wages or salary income    
+  - RNTP: monthly rent  
+  
+### Exploratory data analysis  
+  
+  Variables expressing amounts of money were scaled to thousands of dollars and employment status was used to filter individuals not actively employed. Educational attainment was binned to reduce the number of levels.  
+  Boxplots and density plots of adjusted income by state are difficult to read in the presence of outliers, so the scale of observations is restricted to get a better look at the bulk of the data. Idaho exibits a slightly lower median, while Washington has a slightly higher interquartile range.   
+  Pairs plots were created to get a quick snapshot of any potential correlations. Due to the size of the dataset however, a subset of 100,000 observations was considered. Furthermore, categorical variables were considered separately to continuous variables. The log transformation of continuous variables was also considered separately.    
+  Of the categorical variables, educational attainment exhibited the most obvious trend, with advanced degree holders exhibiting higher personal income. Gender, class of worker and the aforementioned state also showed variation. Reviewing continuous variables revealed the high likelihood of muticollinearity between mortgage payment (MRGP) and selected monthly owner costs (SMOCP), not surprising considering the presumed relationship between those pairs. Mortgage payment was dropped from consideration.  
+  Log transformations of continuous variable revealed no obvious signals.  
+```{r, echo=F, message=F, warning=F, inlcude=F}
+# read data
+df = read.csv(unz("ACSPUMS5Y2019_2022-04-16T191614.zip",
+                  "ACSPUMS5Y2019_2022-04-16T165733.csv"
+                  ), header = T)
+# dim(df)
+# head(df,20)
+
+# char's adding col to end?
+df = subset(df, select=-c(X))
+#colnames(df)
+
+# check for missing
+#df[is.na(df),]
+
+# recode state, gender as string
+df$state = ifelse(df$ST == 16, "ID",
+                  ifelse(df$ST == 41, "OR",
+                         "WA"
+                  )
+                  )
+df$gender = ifelse(df$SEX==1, "Male", "Female")
+
+# adjust for inflation
+df = df %>% 
+  mutate(pincp_adj = (PINCP*ADJINC)/1000,
+         hincp_adj = (HINCP*ADJINC)/1000,
+         mrgp_adj = (MRGP*ADJHSG)/1000,
+         smocp_adj = (SMOCP*ADJHSG)/1000,
+         rntp_adj = (RNTP*ADJHSG)/1000,
+         wagp_adj = (WAGP*ADJINC)/1000
+         )
+
+# convert school and class of worker to factor
+df = df %>%
+  mutate(
+    schl_fac = factor(SCHL),
+    cow_fac = factor(COW),
+    rac_fac = factor(RAC1P)
+  )
+
+# retain only records in labor force
+df = df %>%
+  filter(
+    ESR != 0,
+    ESR != 3,
+    ESR != 6,
+    WKHP > 0,
+    WKHP < 99,
+    wagp_adj > 0
+  )
+
+# recode education to reduce levels
+df = df %>%
+  mutate(
+    edu = case_when(
+      SCHL <= 19 ~ 0, # high school or less
+      SCHL == 20 ~ 1, # associates
+      SCHL == 21 ~ 2, # bachelors
+      SCHL > 21 ~ 3   # master's or doctoral
+    ),
+    edu = factor(edu)
+  )
+
+
+```
+  
+```{r, echo=F, message=F, warning=F}
+
+# univariate distributions
+
+# unadjusted box plots
+#ggplot(df, aes(x=factor(ST), y=PINCP)) +
+#  geom_boxplot(aes(group=ST)) +
+#  theme_minimal()
+
+# adjusted income by state
+p0 = ggplot(df, aes(x=factor(state), y=wagp_adj)) +
+  geom_boxplot(aes(group=state), varwidth=T, outlier.alpha=0.1) +
+  theme_minimal() + 
+  theme(
+    panel.grid = element_blank()
+  ) +
+  labs(
+    x = "State",
+    y = "Adjusted wages (thousands of dollars)",
+    title = "Adjusted wages by PacNW state"
+  )
+p0
+
+# view only up to whiskers
+ylim = boxplot.stats(df$wagp_adj)$stats[c(1,5)]
+p0 + 
+  coord_cartesian(ylim=ylim*1.05) +
+  labs(
+    title = "Adjusted wages by PacNW state (clipped)"
+  )
+
+## adjusted income by state
+# ggplot(df, aes(x=wagp_adj)) +
+#   geom_density(aes(color=factor(state))
+#                  ) +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     y = "Density",
+#     x = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted wages by PacNW state"
+#   )
+
+# # adjusted income by gender
+# ggplot(df, aes(x=gender, y=wagp_adj)) +
+#   geom_boxplot(aes(group=gender), varwidth=T, outlier.alpha=0.1) +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     x = "State",
+#     y = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted income by gender"
+#   )
+
+# # adjusted income by school
+# ggplot(df, aes(x=edu, y=wagp_adj)) +
+#   geom_boxplot(aes(group=edu), varwidth=T, outlier.alpha=0.1) +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     x = "Education",
+#     y = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted wages by education"
+#   )
+# 
+# # adjusted income by work
+# ggplot(df, aes(x=cow_fac, y=wagp_adj)) +
+#   geom_boxplot(aes(group=cow_fac), varwidth=T, outlier.alpha=0.1) +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     x = "Class of worker",
+#     y = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted wages by class of worker"
+#   )
+# 
+# # adjusted income by age
+# ggplot(df, aes(x=AGEP, y=wagp_adj)) +
+#   geom_hex() +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     x = "Age",
+#     y = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted wages by age"
+#   )
+# 
+# # adjusted income by age
+# ggplot(df, aes(x=AGEP, y=wagp_adj)) +
+#   geom_point(alpha=0.1) +
+#   theme_minimal() + 
+#   theme(
+#     panel.grid = element_blank()
+#   ) +
+#   labs(
+#     x = "Age",
+#     y = "Adjusted wages (thousands of dollars)",
+#     title = "Adjusted wages by age"
+#   )
+# 
+ # adjusted income by hours/ week
+ ggplot(df, aes(x=WKHP, y=wagp_adj)) +
+   geom_point(alpha=0.1) +
+   theme_minimal() + 
+   theme(
+     panel.grid = element_blank()
+   ) +
+   labs(
+     x = "Hours/ Week",
+     y = "Adjusted wages (thousands of dollars)",
+     title = "Adjusted wages by hours per week"
+   )
+ 
+ 
+ # adjusted income by hours/ week
+ ggplot(df, aes(x=smocp_adj, y=wagp_adj)) +
+   geom_point(alpha=0.1) +
+   theme_minimal() + 
+   theme(
+     panel.grid = element_blank()
+   ) +
+   labs(
+     x = "Hours/ Week",
+     y = "Adjusted wages (thousands of dollars)",
+     title = "Adjusted wages by hours per week"
+   ) 
+```
+  
+```{r, echo=F, message=F, warning=F}
+# ggpairs categorical vars
+ggpairs(subset(df[sample(nrow(df),100000),], 
+               select = c(wagp_adj, state, gender, edu, rac_fac ))) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=90),
+    strip.text.y.right = element_text(angle=0)
+  ) + 
+  labs(
+    title = "Adjusted Personal Income vs categorical variables"
+  )
+
+# ggpairs continuous vars
+ggpairs(subset(df[sample(nrow(df),100000),], 
+               select = c(wagp_adj, hincp_adj, AGEP, WKHP, mrgp_adj, smocp_adj, rntp_adj))) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=90),
+    strip.text.y.right = element_text(angle=0)
+  ) +
+  labs(
+    title = "Adjusted Personal Income vs continuous variables"
+  )
+```   
+  
+```{r, echo=F, message=F, warning=F, include=FALSE}
+# consider log transformations of continuous vars
+df.log = subset(df, select=c(wagp_adj, hincp_adj, AGEP, WKHP, mrgp_adj, smocp_adj, rntp_adj))
+df.log = df.log %>%
+  mutate(wagp_adj.log = log(wagp_adj),
+         hincp_adj.log = log(hincp_adj),
+         AGEP.log = log(AGEP),
+         WKHP.log = log(WKHP),
+         mrgp_adj.log = log(mrgp_adj),
+         smocp_adj.log = log(smocp_adj),
+         rntp_adj.log = log(rntp_adj)
+         )
+
+ggpairs(subset(df.log[sample(nrow(df),100000),], 
+               select = c(wagp_adj, wagp_adj.log, hincp_adj.log, AGEP.log, 
+                          WKHP.log, mrgp_adj.log, smocp_adj.log, rntp_adj.log))) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle=90),
+    strip.text.y.right = element_text(angle=0)
+  ) +
+  labs(
+    title = "Adj wages vs cont. variables log transforms"
+  )
+
+```    
+  
+### Linear models    
+  
+  Withholding the state variable, for which inference is desired, best subset selection is used to determine which variables to include in the resulting model. Both adjusted R^2 and Cp prefer nearly all variables. Considering BIC reduces this to 10 variables.  
+  Taking the BIC-preferred variables as a starting point, a rich model is fit first. A number of variables are subsequently withheld, one at a time, and F-tests performed to compare reduced models to the full model. In all cases we fail to reject the null hypothesis and the full model is retained.    
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# best subset selection, leave state out
+df.red = subset(df, 
+                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj) )
+
+regfit.full = regsubsets(wagp_adj ~ ., df.red, nvmax=20)
+reg.summary = summary(regfit.full)
+
+tb = tibble(
+  p = 1:length(reg.summary$rsq),
+  rsq = reg.summary$rsq,
+  rss = reg.summary$rss,
+  adjr2 = reg.summary$adjr2,
+  cp = reg.summary$cp,
+  bic = reg.summary$bic,
+)
+
+# adjusted R^2
+ggplot(tb, aes(x = p,y = adjr2)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb[tb$p==which.max( reg.summary$adjr2 ),], 
+             mapping=aes(x = p,y = adjr2),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Adjusted R^2",
+    title = paste("Best adjusted R^2 occurs at p==", toString(which.max( reg.summary$adjr2 )))
+  )
+
+# adjusted Cp
+ggplot(tb, aes(x = p,y = cp)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb[tb$p==which.min( reg.summary$cp ),], 
+             mapping=aes(x = p,y = cp),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted Cp occurs at p==", toString(which.min( reg.summary$cp )))
+  )
+
+# adjusted Cp
+ggplot(tb, aes(x = p,y = bic)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb[tb$p==which.min( reg.summary$bic ),], 
+             mapping=aes(x = p,y = bic),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted BIC occurs at p==", toString(which.min( reg.summary$bic )))
+  )
+
+coef(regfit.full, 12)
+
+```
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+lm.full = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
+summary(lm.full)
+
+# consider reduced models
+lm.red1 = lm(wagp_adj ~ gender + edu + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
+anova(lm.red1, lm.full)
+
+lm.red2 = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP + smocp_adj, df.red)
+anova(lm.red2, lm.full)
+
+lm.red3 = lm(wagp_adj ~ edu + rac_fac + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
+anova(lm.red3, lm.full)
+
+lm.red4 = lm(wagp_adj ~ gender + rac_fac + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
+anova(lm.red4, lm.full)
+
+lm.full.log = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
+summary(lm.full.log)
+```
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}  
+# log model
+
+df.tmp = df.red %>%
+  mutate(
+    WKHP.log = log(WKHP),
+    AGEP.log = log(AGEP),
+    WAGP.log = log(wagp_adj)
+  ) 
+
+
+regfit.test = regsubsets(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp, nvmax=20)
+reg.summary.tmp = summary(regfit.test)
+
+
+tb.tmp = tibble(
+  p = 1:length(reg.summary.tmp$rsq),
+  rsq = reg.summary.tmp$rsq,
+  rss = reg.summary.tmp$rss,
+  adjr2 = reg.summary.tmp$adjr2,
+  cp = reg.summary.tmp$cp,
+  bic = reg.summary.tmp$bic,
+)
+
+# adjusted R^2
+ggplot(tb.tmp, aes(x = p,y = adjr2)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.max( reg.summary.tmp$adjr2 ),], 
+             mapping=aes(x = p,y = adjr2),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Adjusted R^2",
+    title = paste("Best adjusted R^2 occurs at p==", toString(which.max( reg.summary.tmp$adjr2 )))
+  )
+
+# adjusted Cp
+ggplot(tb.tmp, aes(x = p,y = cp)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$cp ),], 
+             mapping=aes(x = p,y = cp),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted Cp occurs at p==", toString(which.min( reg.summary.tmp$cp )))
+  )
+
+# adjusted Cp
+ggplot(tb.tmp, aes(x = p,y = bic)) +
+  geom_line(color = 'cornflowerblue') +
+  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$bic ),], 
+             mapping=aes(x = p,y = bic),color='tomato') +
+  theme_minimal() +
+  labs(
+    x = "Number of variables",
+    y = "Cp",
+    title = paste("Best adjusted BIC occurs at p==", toString(which.min( reg.summary.tmp$bic )))
+  )
+
+coef(regfit.full, 13)
+
+```  
+  
+  
+### Model diagnostics    
+  
+  Proceeding with the full model identified by best subset selection, model diagnostics reveal large residual errors with extreme deviation from normality, indicating a violation of the assumptions of linear regression. The plot of residual error against fitted value shows several concerning issues: a large percentage of the population has residual errors of hundreds of thousands of dollars, predicted wages are negative for a subset of the population and there is a downward trend indicating that the residual error becomes negative as fitted values become larger.   
+  Plots of residuals against explanatory variables reveal further concerning trends, as the constant variance assumption appears to be violated, particularly at the lower and upper values of the predictors. Lastly, the QQ-plot exhibits an extreme departure from normality at upper quantiles.  
+  
+  Returning to model definition, response is instead modeled as the logarithm of wages and the logarithm of continuous predictors is include in best subset selection. Using the logarithm of wages earned results in a higher adjusted R^2, although logarithms of predictors aren't included in the optimal subset. Repeating model diagnostics continues to reveal model issues: while deviation from normality assumption is somewhat reduced, there is clearly non-constant variance at higher values of explanatory variables and residuals continue to be large.    
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# residual vs fitted
+df.red.fort = fortify(lm.full, df.red)
+qplot(.fitted, .resid, data=df.red.fort)
+
+# # residual vs explanatory
+# qplot(AGEP, .resid, data = df.red.fort) 
+# qplot(WKHP, .resid, data = df.red.fort) 
+# #qplot(WKWN, .resid, data = df.red.fort) 
+# qplot(smocp_adj, .resid, data = df.red.fort) 
+# qplot(rntp_adj, .resid, data = df.red.fort) 
+# #multiplot(p1, p2, p3, p4, p5, cols=5)
+
+# qqplot
+qplot(sample = df.red.fort$.resid) + stat_qqline() 
+
+```
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
+#summary(lm.test)
+
+# check reduced model
+
+# residual vs fitted
+df.tmp.fort = fortify(lm.test, df.tmp)
+qplot(.fitted, .resid, data=df.tmp.fort)
+
+# # residual vs explanatory
+# qplot(AGEP, .resid, data = df.tmp.fort) 
+# qplot(WKHP, .resid, data = df.tmp.fort) 
+# qplot(smocp_adj, .resid, data = df.tmp.fort) 
+# qplot(rntp_adj, .resid, data = df.tmp.fort) 
+# #multiplot(p1, p2, p3, p4, p5, cols=5)
+
+# qqplot
+qplot(sample = df.tmp.fort$.resid) + stat_qqline() 
+
+```  
+  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}  
+# non-linear approaches
+library(splines)
+
+#lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
+
+
+# AGEP w/ 4 df == 3 knots
+lm.gam1 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              WKHP + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
+summary(lm.gam1)
+
+
+# AGEP w/ 4 df == 3 knots
+# WKHP w/ 4 df == 3 knots
+lm.gam2 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              ns(WKHP,4) + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
+summary(lm.gam2)
+
+
+
+lm.gam3 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              ns(WKHP,4) + ns(smocp_adj,4) + ns(rntp_adj,4) + 
+               ns(WKHP.log,4) + ns(AGEP.log,4), df.tmp )
+summary(lm.gam3)
+
+anova(lm.gam1, lm.gam3)
+
+df.gam.fort = fortify(lm.gam3, df.tmp)
+qplot(.fitted, .resid, data=df.gam.fort)
+
+# # residual vs explanatory
+# qplot(AGEP, .resid, data = df.tmp.fort) 
+# qplot(WKHP, .resid, data = df.tmp.fort) 
+# qplot(smocp_adj, .resid, data = df.tmp.fort) 
+# qplot(rntp_adj, .resid, data = df.tmp.fort) 
+# #multiplot(p1, p2, p3, p4, p5, cols=5)
+
+# qqplot
+qplot(sample = df.gam.fort$.resid) + stat_qqline() 
+
+
+```
+  
+### Conclusion  
+  
+  Clearly the model, as identified by best subset selection and fitted by multiple linear regression, exhibits several serious violations of assumptions. For completeness sake, in order to answer the question posited at the outset, a linear regression model is fit with all previously included explanatory variables and Pacific Northwest state, as a factor. Reviewing the results from this new model indicates that, with respect to Idaho residency as a baseline, only Washington residency is found to be significant at a p-value < 0.0001. The coefficient for the Washington indicator is estimated to be 5.45, indicating a non-trivial impact upon wages (in thousands of dollars).  
+  Even with the obvious improvement from modeling the logarithm of wages earned, serious issues remain. Including state information in the model with the logarithm response now results in the statistical significance of both Oregon and Washington residency with respect to Idaho residency. Oregon residency is estimated to correspond to roughly 9% higher wages, while Washington residency approaches 20% higher wages.  
+  
+```{r, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}  
+df.red.state = subset(df, 
+                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
+lm.full.state = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state)
+summary(lm.full.state)  
+
+```  
+  
+```{r, echo=FALSE, message=FALSE, warning=FALSE}  
+df.red.state.tmp = subset(df, 
+                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
+lm.full.state.tmp = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state.tmp)
+summary(lm.full.state.tmp)  
+
+```  
+  
+### Appendix: R code
+```{r ref.label=knitr::all_labels(), echo = T, eval = F}
+```
