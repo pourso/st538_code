@@ -251,18 +251,32 @@ p0 +
 #     title = "Adjusted wages by age"
 #   )
 # 
-# # adjusted income by hours/ week
-# ggplot(df, aes(x=WKHP, y=wagp_adj)) +
-#   geom_point(alpha=0.1) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "Age",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by age"
-#   )
+ # adjusted income by hours/ week
+ ggplot(df, aes(x=WKHP, y=wagp_adj)) +
+   geom_point(alpha=0.1) +
+   theme_minimal() + 
+   theme(
+     panel.grid = element_blank()
+   ) +
+   labs(
+     x = "Hours/ Week",
+     y = "Adjusted wages (thousands of dollars)",
+     title = "Adjusted wages by hours per week"
+   )
+ 
+ 
+ # adjusted income by hours/ week
+ ggplot(df, aes(x=smocp_adj, y=wagp_adj)) +
+   geom_point(alpha=0.1) +
+   theme_minimal() + 
+   theme(
+     panel.grid = element_blank()
+   ) +
+   labs(
+     x = "Hours/ Week",
+     y = "Adjusted wages (thousands of dollars)",
+     title = "Adjusted wages by hours per week"
+   ) 
 ```
   
 ```{r, echo=F, message=F, warning=F}
@@ -380,7 +394,7 @@ coef(regfit.full, 12)
 
 ```
   
-```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
 lm.full = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
 summary(lm.full)
 
@@ -401,7 +415,7 @@ lm.full.log = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_a
 summary(lm.full.log)
 ```
   
-```{r, echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}  
+```{r, echo=FALSE, warning=FALSE, message=FALSE}  
 # log model
 
 df.tmp = df.red %>%
@@ -465,6 +479,7 @@ coef(regfit.full, 13)
 
 ```  
   
+  
 ### Model diagnostics    
   
   Proceeding with the full model identified by best subset selection, model diagnostics reveal large residual errors with extreme deviation from normality, indicating a violation of the assumptions of linear regression. The plot of residual error against fitted value shows several concerning issues: a large percentage of the population has residual errors of hundreds of thousands of dollars, predicted wages are negative for a subset of the population and there is a downward trend indicating that the residual error becomes negative as fitted values become larger.   
@@ -513,6 +528,49 @@ qplot(sample = df.tmp.fort$.resid) + stat_qqline()
 
 ```  
   
+```{r, echo=FALSE, warning=FALSE, message=FALSE}  
+# non-linear approaches
+library(splines)
+
+#lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
+
+
+# AGEP w/ 4 df == 3 knots
+lm.gam1 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              WKHP + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
+summary(lm.gam1)
+
+
+# AGEP w/ 4 df == 3 knots
+# WKHP w/ 4 df == 3 knots
+lm.gam2 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              ns(WKHP,4) + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
+summary(lm.gam2)
+
+
+
+lm.gam3 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              ns(WKHP,4) + ns(smocp_adj,4) + ns(rntp_adj,4) + 
+               ns(WKHP.log,4) + ns(AGEP.log,4), df.tmp )
+summary(lm.gam3)
+
+anova(lm.gam1, lm.gam3)
+
+df.gam.fort = fortify(lm.gam3, df.tmp)
+qplot(.fitted, .resid, data=df.gam.fort)
+
+# # residual vs explanatory
+# qplot(AGEP, .resid, data = df.tmp.fort) 
+# qplot(WKHP, .resid, data = df.tmp.fort) 
+# qplot(smocp_adj, .resid, data = df.tmp.fort) 
+# qplot(rntp_adj, .resid, data = df.tmp.fort) 
+# #multiplot(p1, p2, p3, p4, p5, cols=5)
+
+# qqplot
+qplot(sample = df.gam.fort$.resid) + stat_qqline() 
+
+
+```
   
 ### Conclusion  
   
