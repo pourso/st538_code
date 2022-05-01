@@ -593,6 +593,20 @@ summary(lm.full.state.tmp)
 
 ```  
   
+```{r, echo=FALSE, message=FALSE, warning=FALSE}  
+df.red.state.tmp = subset(df, 
+                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
+#lm.full.state.tmp = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state.tmp)
+
+lm.gam3.state = lm(log(wagp_adj) ~ gender + edu + rac_fac + ns(AGEP, 4) +
+              ns(WKHP,4) + ns(smocp_adj,4) + ns(rntp_adj,4) + state, 
+              df.red.state.tmp )
+
+summary(lm.gam3.state)  
+
+```  
+  
+    
 ### Appendix: R code
 ```{r ref.label=knitr::all_labels(), echo = T, eval = F}
 ```
