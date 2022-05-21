@@ -67,8 +67,12 @@ angle <- function (x, y) {
 ### Drawing the distance of points from lines in the scatter plot like 
 ### in slides 6-9 in lecture slides Week8_PCA1.pdf
 
-x <- read.csv("class_scores.csv")
+x <- read.csv("mod8/class_scores.csv")
+
 mean.x <- colMeans(x)
+
+## distance from X1 mean
+
 # png("pca_var1.png")
 plot(x[,1], x[,2], xlab="X1", ylab="X2", xlim=c(20,100), ylim=c(20,100))
 abline(v=mean.x[1])
@@ -76,6 +80,8 @@ for(i in 1:dim(x)[1]) {
   segments(x[i,1], x[i,2], mean.x[1], x[i,2], lty=2)
 }
 # dev.off()
+
+## distance from X2 mean
 
 # png("pca_var2.png")
 plot(x[,1], x[,2], xlab="X1", ylab="X2", xlim=c(20,100), ylim=c(20,100))
@@ -85,10 +91,18 @@ for(i in 1:dim(x)[1]) {
 }
 # dev.off()
 
+## min distance
+
+# 1. compute covariance matrix
 cov.x <- cov(x)
+
+# 2. spectral decomposition: compute eigenvalues and eigenvectors
 pc <- eigen(cov.x)
+
+# 3. ???
 b <- pc$vectors[2,1]/pc$vectors[1,1]
 a <- mean.x[2] - b*mean.x[1]
+
 perp.segment.coord <- function(x0, y0, a=0,b=1){
   #finds endpoint for a perpendicular segment from the point (x0,y0) to the line
   # defined by lm.mod as y=a+b*x
@@ -104,6 +118,10 @@ for(i in 1:dim(x)[1]) {
   segments(x[i,1], x[i,2], ss[i,1], ss[i,2], lty=2, xlim=c(0,100), ylim=c(0,100))
 }
 # dev.off()
+
+## max distance
+
+# 3. ???
 b <- pc$vectors[2,2]/pc$vectors[1,2]
 a <- mean.x[2] - b*mean.x[1]
 ss <- perp.segment.coord(x[,1], x[,2], a, b)
@@ -138,7 +156,7 @@ abline(a2, b2, lty=2, col=2)
 ###############################################################
 
 ### Principal Components for Banknote data
-x <- read.csv("banknote.csv")
+x <- read.csv("mod8/banknote.csv")
 
 # png("banknote1,png")
 pairs(x[, 1:6], col=(x$Y+1))  # Scatter plot pairs
@@ -162,7 +180,7 @@ plot(cumsum(bn.pc1$sdev^2)/sum(bn.pc1$sdev^2))  # plot of cumulative variance of
 ###############################################################
 
 # Class Scores
-x <- read.csv("class_scores.csv")
+x <- read.csv("mod8/class_scores.csv")
 
 pc <- prcomp(x)  # Eigen decomposition of Sample Covariance
 pc1 <- prcomp(x, scale. = T)  # Eigen decomposition of Sample Covariance
