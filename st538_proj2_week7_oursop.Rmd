@@ -13,11 +13,57 @@ knitr::opts_chunk$set(echo = FALSE)
   
 ```{r, echo=F, warning=F, message=F}
 library(tidyverse)
+
 library(rpart)
+library(tree)
+library(randomForest)
+library(ipred)
+library(gbm)
+library(xgboost)
 
 ```
-    
-```{r, echo=F, warning=F, message=F, include=F}  
+  
+```{r, echo=F, message=F, warning=F, include=F}
+# copied from: Week2_LR2_code.R
+if(! (packageVersion("ggplot2") >= "2.0.0")) {
+  stop("This version of stat_qqline require ggplot2 version 2.0.0 or greater")
+}
+
+StatQQLine <- ggproto("StatQQLine", Stat,
+                      compute_group = function(data, scales, distribution = qnorm, dparams = list()) {
+                        data <- remove_missing(data, na.rm = TRUE, "sample", name = "stat_qqline")
+                        y <- quantile(data$sample, c(0.25, 0.75))
+                        x <- do.call(distribution, c(list(p = c(0.25, 0.75)), dparams))
+                        slope <- diff(y)/diff(x)
+                        int <- y[1L] - slope * x[1L]
+                        data.frame(slope = slope, intercept = int)
+                      },
+                      
+                      required_aes = c("sample")
+)
+
+stat_qqline <- function(mapping = NULL, data = NULL, geom = "abline",
+                        position = "identity", na.rm = FALSE, show.legend = NA,
+                        distribution = qnorm, dparams = list(),
+                        inherit.aes = TRUE, ...) {
+  layer(
+    stat = StatQQLine, data = data, mapping = mapping, geom = geom,
+    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
+    params = list(na.rm = na.rm, distribution = distribution, dparams = dparams, ...)
+  )
+}
+```     
+  
+     
+## st538 Project \#2, Group \#4 - Interim Report, week 7  
+   
+### Introduction  
+  
+    For this project we chose dataset 5, the Kaggle Product Line Performance Challenge. Bosch's challenge to Kaggle users is to predict component failure on the basis of measurements made throughout the manufacturing process. Each component, or observation, includes a large amount of numerical, categorical and date data. These features are anonymized, but identified by a feature number, as well as the line and station ID on which the measurement was made. The date features indicate the date on which the measurement was made.  
+  
+    The components are uniquely identified and labelled as to whether they failed quality control. Given that a successful manufacturing company would naturally minimize failures, it is expected that the data would be highly imbalanced.  
+  
+```{r, echo=F, warning=F, message=F, include=F, eval=F}  
 #C:/Users/pourso/Google Drive/School/st538/st538_code
 
 # read data
@@ -73,15 +119,101 @@ rm(df_n_50k)
 rm(df_d_50k)
 gc()
 # NAs?
-```  
+```    
   
 ```{r, echo=F, message=F, warning=F}  
+# load data
+df_nc_train = read.csv('train_40k.csv', header = T)
+
+#df_nc_val = read.csv('val_10k.csv', header = T)
+
 # separate features, response, ignore ID and X
 df_nc_train_y = df_nc_train[,ncol(df_nc_train)]
-#mean(df_nc_train_y) # only 0.55% faulty
-df_nc_train_X = df_nc_train[,3:(ncol(df_nc_train)-1)]
+df_nc_train_X = df_nc_train[,4:(ncol(df_nc_train)-1)]
+
+mean(df_nc_train_y) # only 0.55% faulty
 
 df_t = data.frame(x=df_nc_train_X, y=factor(df_nc_train_y))
+
+# explicitly convert cat data to factors
+df_t_tmp = df_t
+df_t_tmp[, 1:2140] <- lapply(df_t_tmp[, 1:2140], as.factor)
+
+# FIXME: this will vary from sample to sample
+# remove cols of all NAs
+tmp = df_t_tmp[, colSums(is.na(df_t_tmp)) < nrow(df_t_tmp)]
+```    
+  
+### Feature extraction and description    
+  
+    As the specifying the exact features would likely reveal trade secrets, features were anonymized and represented in the format:     
+> L<Line #>_S<Station #>_F<Feature #>  
+  
+  
+    The precise meaning of "line", "station" and "feature" is not provided, but given the manufacturing context it is likely that features refer to specfic measurements, stations refer to specific tools and lines refer to the overall sequence of operations. It would not be surprising for there to be redundancy in the lines and stations: each line might produce the same component and hence consist of the same types of stations. Furthermore, each line would likely have redundant stations to enable increased throughput.      
+     
+    Assuming redundancies in lines and stations, then the feature labels themselves _could_ serve as features themselves: which specific station processed a component is useful information, as the individual station performance would vary.           
+     
+    The datasets were provided in several CSV files: training and test data were separated and presumably no response data was provided for test data. Training data was exclusively used for this project and was split across three files: numerical, categorical and datetime data. The datetime data indicated when the numerical and categorical data was collected for each observation.    
+  
+    There were nearly 1,200,000 observations, with 968 numerical features, 2140 categorical features and their associated datetime data.    
+       
+### Building classifiers and results     
+   
+    Given the sheer volume of data, it was necessary to reduce the dataset to something that could be tackled on a personal computer. Using the full dataset would require access to massively parallel cloud computing resources. While the entire numerical data set could be loaded into memory, it was impossible to do so for the categorical data, so only 200,000 rows was read from the numerical and categorical CSVs. Datetime data was not used.     
+  
+    Once in memory, a train-test split of the 200,000 observations in a ratio of 3:1 was written back to disk, with categorical and numerical data joined. Even 150,000 observations was infeasible, so a subset of 50,000 observations was loaded and split 4:1 to serve as training and validation data.      
+   
+    Features and response were separated; defective components accounted for ~0.55% of the training data, confirming the highly imbalanced nature of the dataset. A classification regression tree was fit to the full feature set and 6 variables were considered for the first split. Of the 6 features, L1_S24_F1846 was found to be the most important and a split of:  
+> L1_S24_F1846 < -0.31  
+  
+  
+    was used to to assign observations to the defective component class. This was found to improve upon the null model of just guessing the majority class (non-defective), but over 37,000 observations were missing data for this feature, so it was not a very relevant split.  
+    
+    The misclassification rate was ~0.547% with the below table indicating a non-trival amount of non-defective parts were predicted to be defective. Given a better model, this might be an acceptable trade-off: while it is expensive to fail good parts, it is likely more expensive to sell bad parts, considering both the cost of the customer return and the impact to brand image.  
+  
+          | good  | bad  
+    --------------------  
+    pgood | 39786 | 5
+     pbad |   214 | 8    
+   
+```{r, echo=F, message=F, warning=F, include=F}
+## single classification decision tree
+
+# classification tree
+rpart_tmp = rpart(y~., data = tmp, method = 'class')
+
+# display the results
+printcp(rpart_tmp) 
+
+# visualize cross-validation results
+plotcp(rpart_tmp) 
+
+# detailed summary of splits
+summary(rpart_tmp, pretty = T) 
+
+# plot tree
+plot(rpart_tmp, uniform=TRUE,
+     main="Classification Tree")
+text(rpart_tmp, use.n=TRUE, all=TRUE, cex=.5)
+
+# Fitted Values in class probabilities
+pred_tmp = predict(rpart_tmp, tmp[,1:(ncol(tmp)-1)])
+
+# Fitted response labels
+res_tmp = ifelse(pred_tmp[, 1] > 0.5, 0, 1)
+
+# Plotting the data with fitted labels based on the model
+#plot(sim.data1$x.1, sim.data1$x.2, pch = as.numeric(sim.data1$y),
+#     col = factor(res))
+
+# Misclassification errors in the training data
+table(tmp$y, res_tmp)
+
+```    
+  
+```{r, echo=F, message=F, warning=F, include=F, eval=F}
+## single classification decision tree
 
 # classification tree
 rpart_t = rpart(y~., data = df_t, method = 'class')
@@ -100,591 +232,266 @@ plot(rpart_t, uniform=TRUE,
      main="Classification Tree")
 text(rpart_t, use.n=TRUE, all=TRUE, cex=.5)
 
+# Fitted Values in class probabilities
+pred_1 = predict(rpart_t, df_t[,1:(ncol(df_t)-1)])
 
-```  
-  
-```{r, echo=F, message=F, warning=F, include=F}
-library(tidyverse)
-library(GGally)
-library(leaps)
-#library(graphics)
-library(Rmisc)
+# Fitted response labels
+res_1 = ifelse(pred_1[, 1] > 0.5, 0, 1)
 
+# Plotting the data with fitted labels based on the model
+#plot(sim.data1$x.1, sim.data1$x.2, pch = as.numeric(sim.data1$y),
+#     col = factor(res))
 
-# copied from: Week2_LR2_code.R
-if(! (packageVersion("ggplot2") >= "2.0.0")) {
-  stop("This version of stat_qqline require ggplot2 version 2.0.0 or greater")
-}
-
-StatQQLine <- ggproto("StatQQLine", Stat,
-                      compute_group = function(data, scales, distribution = qnorm, dparams = list()) {
-                        data <- remove_missing(data, na.rm = TRUE, "sample", name = "stat_qqline")
-                        y <- quantile(data$sample, c(0.25, 0.75))
-                        x <- do.call(distribution, c(list(p = c(0.25, 0.75)), dparams))
-                        slope <- diff(y)/diff(x)
-                        int <- y[1L] - slope * x[1L]
-                        data.frame(slope = slope, intercept = int)
-                      },
-                      
-                      required_aes = c("sample")
-)
-
-stat_qqline <- function(mapping = NULL, data = NULL, geom = "abline",
-                        position = "identity", na.rm = FALSE, show.legend = NA,
-                        distribution = qnorm, dparams = list(),
-                        inherit.aes = TRUE, ...) {
-  layer(
-    stat = StatQQLine, data = data, mapping = mapping, geom = geom,
-    position = position, show.legend = show.legend, inherit.aes = inherit.aes,
-    params = list(na.rm = na.rm, distribution = distribution, dparams = dparams, ...)
-  )
-}
-```
-
-## Project \#1 - Interim Report  
-  
-  After accounting for gender, race, educational attainment and typical hours worked, is there an effect of state residency on total person's income in the Pacific Northwest states of Washington, Oregon and Idaho?  
-  
-  The dataset used included 5-year PUMS data for the states of Washington, Oregon and Idaho, for years 2015-2019. Income and housing cost variables were adjusted and string data were recoded in some cases for convenience.   
-  Specific variables include:   
-  - ESR: employment status  
-  - SEX: gender  
-  - MRGP: mortgage payment amount  
-  - COW: class of worker  
-  - AGEP: age  
-  - RAC1P: race  
-  - SCHL: educational attainment  
-  - WKHP: usual hours worked per week  
-  - SMOCP: selected monthly owner costs  
-  - WAGP: wages or salary income    
-  - RNTP: monthly rent  
-  
-### Exploratory data analysis  
-  
-  Variables expressing amounts of money were scaled to thousands of dollars and employment status was used to filter individuals not actively employed. Educational attainment was binned to reduce the number of levels.  
-  Boxplots and density plots of adjusted income by state are difficult to read in the presence of outliers, so the scale of observations is restricted to get a better look at the bulk of the data. Idaho exibits a slightly lower median, while Washington has a slightly higher interquartile range.   
-  Pairs plots were created to get a quick snapshot of any potential correlations. Due to the size of the dataset however, a subset of 100,000 observations was considered. Furthermore, categorical variables were considered separately to continuous variables. The log transformation of continuous variables was also considered separately.    
-  Of the categorical variables, educational attainment exhibited the most obvious trend, with advanced degree holders exhibiting higher personal income. Gender, class of worker and the aforementioned state also showed variation. Reviewing continuous variables revealed the high likelihood of muticollinearity between mortgage payment (MRGP) and selected monthly owner costs (SMOCP), not surprising considering the presumed relationship between those pairs. Mortgage payment was dropped from consideration.  
-  Log transformations of continuous variable revealed no obvious signals.  
-```{r, echo=F, message=F, warning=F, inlcude=F}
-# read data
-df = read.csv(unz("ACSPUMS5Y2019_2022-04-16T191614.zip",
-                  "ACSPUMS5Y2019_2022-04-16T165733.csv"
-                  ), header = T)
-# dim(df)
-# head(df,20)
-
-# char's adding col to end?
-df = subset(df, select=-c(X))
-#colnames(df)
-
-# check for missing
-#df[is.na(df),]
-
-# recode state, gender as string
-df$state = ifelse(df$ST == 16, "ID",
-                  ifelse(df$ST == 41, "OR",
-                         "WA"
-                  )
-                  )
-df$gender = ifelse(df$SEX==1, "Male", "Female")
-
-# adjust for inflation
-df = df %>% 
-  mutate(pincp_adj = (PINCP*ADJINC)/1000,
-         hincp_adj = (HINCP*ADJINC)/1000,
-         mrgp_adj = (MRGP*ADJHSG)/1000,
-         smocp_adj = (SMOCP*ADJHSG)/1000,
-         rntp_adj = (RNTP*ADJHSG)/1000,
-         wagp_adj = (WAGP*ADJINC)/1000
-         )
-
-# convert school and class of worker to factor
-df = df %>%
-  mutate(
-    schl_fac = factor(SCHL),
-    cow_fac = factor(COW),
-    rac_fac = factor(RAC1P)
-  )
-
-# retain only records in labor force
-df = df %>%
-  filter(
-    ESR != 0,
-    ESR != 3,
-    ESR != 6,
-    WKHP > 0,
-    WKHP < 99,
-    wagp_adj > 0
-  )
-
-# recode education to reduce levels
-df = df %>%
-  mutate(
-    edu = case_when(
-      SCHL <= 19 ~ 0, # high school or less
-      SCHL == 20 ~ 1, # associates
-      SCHL == 21 ~ 2, # bachelors
-      SCHL > 21 ~ 3   # master's or doctoral
-    ),
-    edu = factor(edu)
-  )
-
-
-```
-  
-```{r, echo=F, message=F, warning=F}
-
-# univariate distributions
-
-# unadjusted box plots
-#ggplot(df, aes(x=factor(ST), y=PINCP)) +
-#  geom_boxplot(aes(group=ST)) +
-#  theme_minimal()
-
-# adjusted income by state
-p0 = ggplot(df, aes(x=factor(state), y=wagp_adj)) +
-  geom_boxplot(aes(group=state), varwidth=T, outlier.alpha=0.1) +
-  theme_minimal() + 
-  theme(
-    panel.grid = element_blank()
-  ) +
-  labs(
-    x = "State",
-    y = "Adjusted wages (thousands of dollars)",
-    title = "Adjusted wages by PacNW state"
-  )
-p0
-
-# view only up to whiskers
-ylim = boxplot.stats(df$wagp_adj)$stats[c(1,5)]
-p0 + 
-  coord_cartesian(ylim=ylim*1.05) +
-  labs(
-    title = "Adjusted wages by PacNW state (clipped)"
-  )
-
-## adjusted income by state
-# ggplot(df, aes(x=wagp_adj)) +
-#   geom_density(aes(color=factor(state))
-#                  ) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     y = "Density",
-#     x = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by PacNW state"
-#   )
-
-# # adjusted income by gender
-# ggplot(df, aes(x=gender, y=wagp_adj)) +
-#   geom_boxplot(aes(group=gender), varwidth=T, outlier.alpha=0.1) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "State",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted income by gender"
-#   )
-
-# # adjusted income by school
-# ggplot(df, aes(x=edu, y=wagp_adj)) +
-#   geom_boxplot(aes(group=edu), varwidth=T, outlier.alpha=0.1) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "Education",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by education"
-#   )
-# 
-# # adjusted income by work
-# ggplot(df, aes(x=cow_fac, y=wagp_adj)) +
-#   geom_boxplot(aes(group=cow_fac), varwidth=T, outlier.alpha=0.1) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "Class of worker",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by class of worker"
-#   )
-# 
-# # adjusted income by age
-# ggplot(df, aes(x=AGEP, y=wagp_adj)) +
-#   geom_hex() +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "Age",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by age"
-#   )
-# 
-# # adjusted income by age
-# ggplot(df, aes(x=AGEP, y=wagp_adj)) +
-#   geom_point(alpha=0.1) +
-#   theme_minimal() + 
-#   theme(
-#     panel.grid = element_blank()
-#   ) +
-#   labs(
-#     x = "Age",
-#     y = "Adjusted wages (thousands of dollars)",
-#     title = "Adjusted wages by age"
-#   )
-# 
- # adjusted income by hours/ week
- ggplot(df, aes(x=WKHP, y=wagp_adj)) +
-   geom_point(alpha=0.1) +
-   theme_minimal() + 
-   theme(
-     panel.grid = element_blank()
-   ) +
-   labs(
-     x = "Hours/ Week",
-     y = "Adjusted wages (thousands of dollars)",
-     title = "Adjusted wages by hours per week"
-   )
- 
- 
- # adjusted income by hours/ week
- ggplot(df, aes(x=smocp_adj, y=wagp_adj)) +
-   geom_point(alpha=0.1) +
-   theme_minimal() + 
-   theme(
-     panel.grid = element_blank()
-   ) +
-   labs(
-     x = "Hours/ Week",
-     y = "Adjusted wages (thousands of dollars)",
-     title = "Adjusted wages by hours per week"
-   ) 
-```
-  
-```{r, echo=F, message=F, warning=F}
-# ggpairs categorical vars
-ggpairs(subset(df[sample(nrow(df),100000),], 
-               select = c(wagp_adj, state, gender, edu, rac_fac ))) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle=90),
-    strip.text.y.right = element_text(angle=0)
-  ) + 
-  labs(
-    title = "Adjusted Personal Income vs categorical variables"
-  )
-
-# ggpairs continuous vars
-ggpairs(subset(df[sample(nrow(df),100000),], 
-               select = c(wagp_adj, hincp_adj, AGEP, WKHP, mrgp_adj, smocp_adj, rntp_adj))) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle=90),
-    strip.text.y.right = element_text(angle=0)
-  ) +
-  labs(
-    title = "Adjusted Personal Income vs continuous variables"
-  )
-```   
-  
-```{r, echo=F, message=F, warning=F, include=FALSE}
-# consider log transformations of continuous vars
-df.log = subset(df, select=c(wagp_adj, hincp_adj, AGEP, WKHP, mrgp_adj, smocp_adj, rntp_adj))
-df.log = df.log %>%
-  mutate(wagp_adj.log = log(wagp_adj),
-         hincp_adj.log = log(hincp_adj),
-         AGEP.log = log(AGEP),
-         WKHP.log = log(WKHP),
-         mrgp_adj.log = log(mrgp_adj),
-         smocp_adj.log = log(smocp_adj),
-         rntp_adj.log = log(rntp_adj)
-         )
-
-ggpairs(subset(df.log[sample(nrow(df),100000),], 
-               select = c(wagp_adj, wagp_adj.log, hincp_adj.log, AGEP.log, 
-                          WKHP.log, mrgp_adj.log, smocp_adj.log, rntp_adj.log))) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle=90),
-    strip.text.y.right = element_text(angle=0)
-  ) +
-  labs(
-    title = "Adj wages vs cont. variables log transforms"
-  )
+# Misclassification errors in the training data
+table(df_t$y, res_1)
 
 ```    
   
-### Linear models    
+```{r, echo=F, message=F, warning=F, eval=F, include=F}
+
+# too many NAs for tree() ???
+tree_t = tree(y ~ ., tmp)
+
+summary(tree_t)
+
+plot(tree_t)
+text(tree_t, pretty=0)
+```
   
-  Withholding the state variable, for which inference is desired, best subset selection is used to determine which variables to include in the resulting model. Both adjusted R^2 and Cp prefer nearly all variables. Considering BIC reduces this to 10 variables.  
-  Taking the BIC-preferred variables as a starting point, a rich model is fit first. A number of variables are subsequently withheld, one at a time, and F-tests performed to compare reduced models to the full model. In all cases we fail to reject the null hypothesis and the full model is retained.    
+```{r, echo=F, message=F, warning=F, eval=F}  
+## randomForests
+
+set.seed(1)
+
+# explicitly convert cat data to factors
+#df_t_tmp = df_t
+#df_t_tmp[, 1:2140] <- lapply(df_t_tmp[, 1:2140], as.factor)
+
+bag_t = randomForest(y ~ ., data = tmp, mtry = 1998,
+                          importance = TRUE, na.action = na.roughfix)
+```  
   
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
-# best subset selection, leave state out
-df.red = subset(df, 
-                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj) )
+```{r, echo=F, message=F, warning=F, eval=F}  
+## randomForests
 
-regfit.full = regsubsets(wagp_adj ~ ., df.red, nvmax=20)
-reg.summary = summary(regfit.full)
+set.seed(1)
 
-tb = tibble(
-  p = 1:length(reg.summary$rsq),
-  rsq = reg.summary$rsq,
-  rss = reg.summary$rss,
-  adjr2 = reg.summary$adjr2,
-  cp = reg.summary$cp,
-  bic = reg.summary$bic,
-)
+# explicitly convert cat data to factors
+#df_t_tmp = df_t
+#df_t_tmp[, 1:2140] <- lapply(df_t_tmp[, 1:2140], as.factor)
 
-# adjusted R^2
-ggplot(tb, aes(x = p,y = adjr2)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb[tb$p==which.max( reg.summary$adjr2 ),], 
-             mapping=aes(x = p,y = adjr2),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Adjusted R^2",
-    title = paste("Best adjusted R^2 occurs at p==", toString(which.max( reg.summary$adjr2 )))
-  )
+bag_t = randomForest(y ~ ., data = tmp, mtry = 1998,
+                          importance = TRUE)
+```    
+  
+### Random Forest with na.roughfix  
+```{r, echo=F, message=F, warning=F}  
+set.seed(1)
 
-# adjusted Cp
-ggplot(tb, aes(x = p,y = cp)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb[tb$p==which.min( reg.summary$cp ),], 
-             mapping=aes(x = p,y = cp),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Cp",
-    title = paste("Best adjusted Cp occurs at p==", toString(which.min( reg.summary$cp )))
-  )
+rf_t = randomForest(y ~ ., data = tmp, importance = TRUE, na.action=na.roughfix)
 
-# adjusted Cp
-ggplot(tb, aes(x = p,y = bic)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb[tb$p==which.min( reg.summary$bic ),], 
-             mapping=aes(x = p,y = bic),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Cp",
-    title = paste("Best adjusted BIC occurs at p==", toString(which.min( reg.summary$bic )))
-  )
+pred_rf_t = rf_t$predicted
+table(tmp$y, pred_rf_t)
+```
+    
+### Feature extraction  
+  
+```{r, echo=F, message=F, warning=F}
+# try only numerical features?
 
-coef(regfit.full, 12)
+# use only features from defective parts
+#https://stackoverflow.com/questions/2643939/remove-columns-from-dataframe-where-all-values-are-na
+not_all_na <- function(x) any(!is.na(x))
+
+df_n_200k = read.csv("./bosch-production-line-performance/train_numeric.csv", header = T, nrows = 250000)
+
+df_n_200k_ = df_n_200k %>%
+  filter(Response==1) %>%
+  select(
+    where(not_all_na)
+    )
+n_nna_cols = colnames(df_n_200k_)[1:length(n_nna_cols)-1]
+fail_ids = df_n_200k_[,"Id"]
+
+rm(df_n_200k)
+rm(df_n_200k_)
+gc()
+
+df_c_250k = read.csv("./bosch-production-line-performance/train_categorical.csv", header = T, nrows = 250000)
+df_c_250k = df_c_250k[df_c_250k$Id %in% fail_ids,]
+df_c_250k_ = df_c_250k %>%
+  select(
+    where(not_all_na)
+    )
+c_nna_cols = colnames(df_c_250k_)
+
+rm(df_c_250k)
+rm(df_c_250k_)
+gc()
+
+# separate features, response, ignore ID and X
+df_nc_train_y_nna = df_nc_train[,ncol(df_nc_train)]
+df_nc_train_X_nna = df_nc_train[,4:(ncol(df_nc_train)-1)]
+
+keep_cols = union(c_nna_cols[2:length(c_nna_cols)], n_nna_cols[2:length(n_nna_cols)])
+
+df_nna = data.frame(x=df_nc_train_X_nna[,keep_cols], y=factor(df_nc_train_y_nna))
+
+# explicitly convert cat data to factors
+df_nna_tmp = df_nna
+df_nna_tmp[, 1:1450] <- lapply(df_nna_tmp[, 1:1450], as.factor)
+
+# FIXME: this will vary from sample to sample
+# remove cols of all NAs
+tmp = df_nna_tmp[, colSums(is.na(df_nna_tmp)) < nrow(df_nna_tmp)]
+
+# classification tree
+rpart_nna = rpart(y~., data = tmp, method = 'class')
+
+# display the results
+printcp(rpart_nna) 
+
+# visualize cross-validation results
+plotcp(rpart_nna) 
+
+# detailed summary of splits
+summary(rpart_nna, pretty = T) 
+
+# plot tree
+plot(rpart_nna, uniform=TRUE,
+     main="Classification Tree")
+text(rpart_nna, use.n=TRUE, all=TRUE, cex=.5)
+
+# Fitted Values in class probabilities
+pred_nna = predict(rpart_nna, tmp[,1:(ncol(tmp)-1)])
+
+# Fitted response labels
+res_nna = ifelse(pred_nna[, 1] > 0.5, 0, 1)
+
+# Misclassification errors in the training data
+table(tmp$y, res_nna)
+
+## PCA on numeric features only?
+# classification tree w/ only numeric features
+df_nna_n = data.frame(x=df_nc_train_X_nna[,n_nna_cols[2:length(n_nna_cols)]], y=factor(df_nc_train_y_nna))
+df_nna_n = df_nna_n[, colSums(is.na(df_nna_n)) < nrow(df_nna_n)]
+                                                     
+rpart_nna_n = rpart(y~., data = df_nna_n, method = 'class')
+summary(rpart_nna_n, pretty = T) 
+
+pred_nna_n = predict(rpart_nna_n, df_nna_n)
+res_nna_n = ifelse(pred_nna_n[, 1] > 0.5, 0, 1)
+table(tmp$y, res_nna_n)
+
+# boosting
+gbm.sim1 = gbm.fit(x=df_nna_n[,1:942], y=(as.numeric(df_nna_n$y)-1),
+                  distribution = 'adaboost', n.trees = 2500, nTrain = n*0.7,
+                  verbose = F)
+# Fitted response labels
+pred.gbm.sim1 = ifelse(gbm.sim1$fit > 0, 1, 0)
+
+# Misclassification errors in the training data
+table(df_nna_n$y, pred.gbm.sim1)
+
+# 
+gbm.perf(gbm.sim1)
+
+
+# xgboost
+xgb.sim1 = xgboost(data = as.matrix(df_nna_n[,1:942]), label = (as.numeric(df_nna_n$y)-1), 
+                  max.depth = 6, eta = 1, nrounds = 100,
+                  objective = "binary:logistic", eval_metric = "logloss")
+
+# Fitted response labels
+pred.xgb.sim1 = predict(xgb.sim1, as.matrix(df_nna_n[,1:942]))
+pred.xgb.sim1 = ifelse(pred.xgb.sim1 > 0.5, 1, 0)
+
+# does well, likely overfitting
+table(df_nna_n$y, pred.xgb.sim1)
 
 ```
   
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
-lm.full = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
-summary(lm.full)
-
-# consider reduced models
-lm.red1 = lm(wagp_adj ~ gender + edu + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
-anova(lm.red1, lm.full)
-
-lm.red2 = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP + smocp_adj, df.red)
-anova(lm.red2, lm.full)
-
-lm.red3 = lm(wagp_adj ~ edu + rac_fac + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
-anova(lm.red3, lm.full)
-
-lm.red4 = lm(wagp_adj ~ gender + rac_fac + AGEP + WKHP + smocp_adj + rntp_adj, df.red)
-anova(lm.red4, lm.full)
-
-lm.full.log = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj, df.red)
-summary(lm.full.log)
-```
-  
-```{r, echo=FALSE, warning=FALSE, message=FALSE}  
-# log model
-
-df.tmp = df.red %>%
-  mutate(
-    WKHP.log = log(WKHP),
-    AGEP.log = log(AGEP),
-    WAGP.log = log(wagp_adj)
-  ) 
-
-
-regfit.test = regsubsets(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp, nvmax=20)
-reg.summary.tmp = summary(regfit.test)
-
-
-tb.tmp = tibble(
-  p = 1:length(reg.summary.tmp$rsq),
-  rsq = reg.summary.tmp$rsq,
-  rss = reg.summary.tmp$rss,
-  adjr2 = reg.summary.tmp$adjr2,
-  cp = reg.summary.tmp$cp,
-  bic = reg.summary.tmp$bic,
-)
-
-# adjusted R^2
-ggplot(tb.tmp, aes(x = p,y = adjr2)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb.tmp[tb.tmp$p==which.max( reg.summary.tmp$adjr2 ),], 
-             mapping=aes(x = p,y = adjr2),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Adjusted R^2",
-    title = paste("Best adjusted R^2 occurs at p==", toString(which.max( reg.summary.tmp$adjr2 )))
-  )
-
-# adjusted Cp
-ggplot(tb.tmp, aes(x = p,y = cp)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$cp ),], 
-             mapping=aes(x = p,y = cp),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Cp",
-    title = paste("Best adjusted Cp occurs at p==", toString(which.min( reg.summary.tmp$cp )))
-  )
-
-# adjusted Cp
-ggplot(tb.tmp, aes(x = p,y = bic)) +
-  geom_line(color = 'cornflowerblue') +
-  geom_point(data=tb.tmp[tb.tmp$p==which.min( reg.summary.tmp$bic ),], 
-             mapping=aes(x = p,y = bic),color='tomato') +
-  theme_minimal() +
-  labs(
-    x = "Number of variables",
-    y = "Cp",
-    title = paste("Best adjusted BIC occurs at p==", toString(which.min( reg.summary.tmp$bic )))
-  )
-
-coef(regfit.full, 13)
-
-```  
-  
-  
-### Model diagnostics    
-  
-  Proceeding with the full model identified by best subset selection, model diagnostics reveal large residual errors with extreme deviation from normality, indicating a violation of the assumptions of linear regression. The plot of residual error against fitted value shows several concerning issues: a large percentage of the population has residual errors of hundreds of thousands of dollars, predicted wages are negative for a subset of the population and there is a downward trend indicating that the residual error becomes negative as fitted values become larger.   
-  Plots of residuals against explanatory variables reveal further concerning trends, as the constant variance assumption appears to be violated, particularly at the lower and upper values of the predictors. Lastly, the QQ-plot exhibits an extreme departure from normality at upper quantiles.  
-  
-  Returning to model definition, response is instead modeled as the logarithm of wages and the logarithm of continuous predictors is include in best subset selection. Using the logarithm of wages earned results in a higher adjusted R^2, although logarithms of predictors aren't included in the optimal subset. Repeating model diagnostics continues to reveal model issues: while deviation from normality assumption is somewhat reduced, there is clearly non-constant variance at higher values of explanatory variables and residuals continue to be large.    
-  
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
-# residual vs fitted
-df.red.fort = fortify(lm.full, df.red)
-qplot(.fitted, .resid, data=df.red.fort)
-
-# # residual vs explanatory
-# qplot(AGEP, .resid, data = df.red.fort) 
-# qplot(WKHP, .resid, data = df.red.fort) 
-# #qplot(WKWN, .resid, data = df.red.fort) 
-# qplot(smocp_adj, .resid, data = df.red.fort) 
-# qplot(rntp_adj, .resid, data = df.red.fort) 
-# #multiplot(p1, p2, p3, p4, p5, cols=5)
-
-# qqplot
-qplot(sample = df.red.fort$.resid) + stat_qqline() 
+```{r, echo=F, message=F, warning=F}
+set.seed(1)
+xgb.sim.cv = xgb.cv(data = as.matrix(df_nna_n[,1:942]), label = (as.numeric(df_nna_n$y)-1), 
+                    max.depth = 6, eta = 1, nrounds = 100,
+                    nfold = 5, early_stopping_rounds = 5,
+                    objective = "binary:logistic", eval_metric = "logloss")
+sel_rounds = xgb.sim.cv$best_iteration
+xgb.sim2 = xgboost(data = as.matrix(df_nna_n[,1:942]), label = (as.numeric(df_nna_n$y)-1), 
+                  max.depth = 6, eta = 1, nrounds = sel_rounds,
+                  objective = "binary:logistic", eval_metric = "logloss")
+pred.xgb.sim2 = predict(xgb.sim2, as.matrix(df_nna_n[,1:942]))
+pred.xgb.sim2 = ifelse(pred.xgb.sim2 > 0.5, 1, 0)
+table(df_nna_n$y, pred.xgb.sim2)
 
 ```
   
-```{r, echo=FALSE, warning=FALSE, message=FALSE}
+### Single classification decision tree  
+```{r, echo=F, message=F, warning=F}
+# load train, validation set for single decision tree
+df_nc_train = read.csv('train_40k.csv', header = T)
+df_nc_val = read.csv('val_10k.csv', header = T)
+last_train_row = dim(df_nc_train)[[1]]
+df_nc_trainval= rbind(df_nc_train, df_nc_val)
 
-lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
-#summary(lm.test)
+# separate features, response, ignore ID and X
+df_nc_tv_y = df_nc_trainval[,ncol(df_nc_trainval)]
+df_nc_tv_X = df_nc_trainval[,4:(ncol(df_nc_trainval)-1)]
 
-# check reduced model
+mean(df_nc_tv_y) # only 0.526% faulty
 
-# residual vs fitted
-df.tmp.fort = fortify(lm.test, df.tmp)
-qplot(.fitted, .resid, data=df.tmp.fort)
+df_tv = data.frame(x=df_nc_tv_X, y=factor(df_nc_tv_y))
 
-# # residual vs explanatory
-# qplot(AGEP, .resid, data = df.tmp.fort) 
-# qplot(WKHP, .resid, data = df.tmp.fort) 
-# qplot(smocp_adj, .resid, data = df.tmp.fort) 
-# qplot(rntp_adj, .resid, data = df.tmp.fort) 
-# #multiplot(p1, p2, p3, p4, p5, cols=5)
+# explicitly convert cat data to factors
+df_tv_tmp = df_tv
+df_tv_tmp[, 1:2140] <- lapply(df_tv_tmp[, 1:2140], as.factor)
 
-# qqplot
-qplot(sample = df.tmp.fort$.resid) + stat_qqline() 
+# FIXME: this will vary from sample to sample
+# remove cols of all NAs
+tmp_tv = df_tv_tmp[, colSums(is.na(df_tv_tmp)) < nrow(df_tv_tmp)]
 
-```  
-  
-```{r, echo=FALSE, warning=FALSE, message=FALSE}  
-# non-linear approaches
-library(splines)
+# fit classification tree to training data
+rpart_tree = rpart(y~., data = tmp_tv[1:last_train_row,], method = 'class')
 
-#lm.test = lm(WAGP.log ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp)
+# display the results
+printcp(rpart_tree) 
 
+# visualize cross-validation results
+plotcp(rpart_tree) 
 
-# AGEP w/ 4 df == 3 knots
-lm.gam1 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
-              WKHP + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
-summary(lm.gam1)
+# detailed summary of splits
+summary(rpart_tree, pretty = T) 
 
+# plot tree
+plot(rpart_tree, uniform=TRUE,
+     main="Classification Tree")
+text(rpart_tree, use.n=TRUE, all=TRUE, cex=.5)
 
-# AGEP w/ 4 df == 3 knots
-# WKHP w/ 4 df == 3 knots
-lm.gam2 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
-              ns(WKHP,4) + smocp_adj + rntp_adj + WKHP.log + AGEP.log, df.tmp )
-summary(lm.gam2)
+# Fitted Values in class probabilities
+pred_tree = predict(rpart_tree, tmp_tv[1:last_train_row,1:(ncol(tmp_tv)-1)])
 
+# Fitted response labels
+res_tree = ifelse(pred_tree[, 1] > 0.5, 0, 1)
 
+# Plotting the data with fitted labels based on the model
+#plot(sim.data1$x.1, sim.data1$x.2, pch = as.numeric(sim.data1$y),
+#     col = factor(res))
 
-lm.gam3 = lm(WAGP.log ~ gender + edu + rac_fac + ns(AGEP, 4) +
-              ns(WKHP,4) + ns(smocp_adj,4) + ns(rntp_adj,4) + 
-               ns(WKHP.log,4) + ns(AGEP.log,4), df.tmp )
-summary(lm.gam3)
+# Misclassification errors in the training data
+table(tmp_tv[1:last_train_row, ncol(tmp_tv)], res_tree)
 
-anova(lm.gam1, lm.gam3)
+# Fitted Values in class probabilities
+pred_tree_v = predict(rpart_tree, tmp_tv[(last_train_row+1):nrow(tmp_tv),1:(ncol(tmp_tv)-1)])
 
-df.gam.fort = fortify(lm.gam3, df.tmp)
-qplot(.fitted, .resid, data=df.gam.fort)
+# Fitted response labels
+res_tree_v = ifelse(pred_tree_v[, 1] > 0.5, 0, 1)
 
-# # residual vs explanatory
-# qplot(AGEP, .resid, data = df.tmp.fort) 
-# qplot(WKHP, .resid, data = df.tmp.fort) 
-# qplot(smocp_adj, .resid, data = df.tmp.fort) 
-# qplot(rntp_adj, .resid, data = df.tmp.fort) 
-# #multiplot(p1, p2, p3, p4, p5, cols=5)
-
-# qqplot
-qplot(sample = df.gam.fort$.resid) + stat_qqline() 
-
-
+# Misclassification errors in the training data
+table(tmp_tv[(last_train_row+1):nrow(tmp_tv),ncol(tmp_tv)], res_tree_v)
 ```
-  
-### Conclusion  
-  
-  Clearly the model, as identified by best subset selection and fitted by multiple linear regression, exhibits several serious violations of assumptions. For completeness sake, in order to answer the question posited at the outset, a linear regression model is fit with all previously included explanatory variables and Pacific Northwest state, as a factor. Reviewing the results from this new model indicates that, with respect to Idaho residency as a baseline, only Washington residency is found to be significant at a p-value < 0.0001. The coefficient for the Washington indicator is estimated to be 5.45, indicating a non-trivial impact upon wages (in thousands of dollars).  
-  Even with the obvious improvement from modeling the logarithm of wages earned, serious issues remain. Including state information in the model with the logarithm response now results in the statistical significance of both Oregon and Washington residency with respect to Idaho residency. Oregon residency is estimated to correspond to roughly 9% higher wages, while Washington residency approaches 20% higher wages.  
-  
-```{r, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}  
-df.red.state = subset(df, 
-                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
-lm.full.state = lm(wagp_adj ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state)
-summary(lm.full.state)  
 
-```  
-  
-```{r, echo=FALSE, message=FALSE, warning=FALSE}  
-df.red.state.tmp = subset(df, 
-                select = c(wagp_adj, gender, edu, rac_fac, AGEP, WKHP, smocp_adj, rntp_adj, state) )
-lm.full.state.tmp = lm(log(wagp_adj) ~ gender + edu + rac_fac + AGEP + WKHP +  smocp_adj + rntp_adj + state, df.red.state.tmp)
-summary(lm.full.state.tmp)  
 
-```  
-  
 ### Appendix: R code
 ```{r ref.label=knitr::all_labels(), echo = T, eval = F}
 ```
