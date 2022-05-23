@@ -411,21 +411,6 @@ table(df_nna_n$y, pred.xgb.sim1)
 
 ```
   
-```{r, echo=F, message=F, warning=F}
-set.seed(1)
-xgb.sim.cv = xgb.cv(data = as.matrix(df_nna_n[,1:942]), label = (as.numeric(df_nna_n$y)-1), 
-                    max.depth = 6, eta = 1, nrounds = 100,
-                    nfold = 5, early_stopping_rounds = 5,
-                    objective = "binary:logistic", eval_metric = "logloss")
-sel_rounds = xgb.sim.cv$best_iteration
-xgb.sim2 = xgboost(data = as.matrix(df_nna_n[,1:942]), label = (as.numeric(df_nna_n$y)-1), 
-                  max.depth = 6, eta = 1, nrounds = sel_rounds,
-                  objective = "binary:logistic", eval_metric = "logloss")
-pred.xgb.sim2 = predict(xgb.sim2, as.matrix(df_nna_n[,1:942]))
-pred.xgb.sim2 = ifelse(pred.xgb.sim2 > 0.5, 1, 0)
-table(df_nna_n$y, pred.xgb.sim2)
-
-```
   
 ### Single classification decision tree  
 ```{r, echo=F, message=F, warning=F}
@@ -490,7 +475,86 @@ res_tree_v = ifelse(pred_tree_v[, 1] > 0.5, 0, 1)
 # Misclassification errors in the training data
 table(tmp_tv[(last_train_row+1):nrow(tmp_tv),ncol(tmp_tv)], res_tree_v)
 ```
+  
+### Random Forest    
+  
+  
+### Boosting    
+  
+```{r, echo=F, message=F, warning=F}
+# only numeric features, response
+tmp_xg = df_tv_tmp[,2141:3109]
 
+# drop all NA cols
+tmp_xg = tmp_xg[, colSums(is.na(tmp_xg)) < nrow(tmp_xg)]
+
+# boosting
+gbm.sim1 = gbm.fit(x=as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]), 
+                   y=(as.numeric(tmp_xg[1:last_train_row,ncol(tmp_xg)])-1),
+                  distribution = 'adaboost', n.trees = 2500, nTrain = n*0.7,
+                  verbose = F)
+# Fitted response labels
+pred.gbm.sim1 = ifelse(gbm.sim1$fit > 0, 1, 0)
+
+# Misclassification errors in the training data
+table(tmp_xg[1:last_train_row,ncol(tmp_xg)], pred.gbm.sim1)
+
+# 
+gbm.perf(gbm.sim1)
+
+```
+  
+### Extreme Gradient Boosting      
+  
+```{r, echo=F, message=F, warning=F}
+set.seed(1)
+
+# xgboost
+xgb.sim1 = xgboost(data = as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]), 
+                   label = (as.numeric(tmp_xg[1:last_train_row,ncol(tmp_xg)])-1), 
+                   max.depth = 6, eta = 1, nrounds = 100,
+                   objective = "binary:logistic", eval_metric = "logloss")
+
+# Fitted response labels
+pred.xgb.sim1 = predict(xgb.sim1, 
+                        as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]))
+pred.xgb.sim1 = ifelse(pred.xgb.sim1 > 0.5, 1, 0)
+
+# does well, likely overfitting
+table(tmp_xg[1:last_train_row,ncol(tmp_xg)], pred.xgb.sim1)
+
+# validation data
+# Fitted Values in class probabilities
+pred.xgb.v.sim1 = predict(xgb.sim1, as.matrix(tmp_xg[(last_train_row+1):nrow(tmp_xg),1:ncol(tmp_xg)-1]))
+pred.xgb.v.sim1 = ifelse(pred.xgb.v.sim1 > 0.5, 1, 0)
+
+# misclassification errors in the validation data
+table(tmp_xg[(last_train_row+1):nrow(tmp_xg),ncol(tmp_xg)], pred.xgb.v.sim1)
+
+## early exit
+xgb.sim.cv = xgb.cv(data = as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]), 
+                    label = (as.numeric(tmp_xg[1:last_train_row,ncol(tmp_xg)])-1), 
+                    max.depth = 6, eta = 1, nrounds = 100,
+                    nfold = 5, early_stopping_rounds = 5,
+                    objective = "binary:logistic", eval_metric = "logloss")
+sel_rounds = xgb.sim.cv$best_iteration
+xgb.sim2 = xgboost(data = as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]), 
+                   label = (as.numeric(tmp_xg[1:last_train_row,ncol(tmp_xg)])-1), 
+                   max.depth = 6, eta = 1, nrounds = sel_rounds,
+                   objective = "binary:logistic", eval_metric = "logloss")
+
+# training data
+pred.xgb.sim2= predict(xgb.sim2, as.matrix(tmp_xg[1:last_train_row,1:ncol(tmp_xg)-1]))
+pred.xgb.sim2 = ifelse(pred.xgb.sim2 > 0.5, 1, 0)
+
+# 
+table(tmp_xg[1:last_train_row,ncol(tmp_xg)], pred.xgb.sim2)
+
+# validation data
+pred.xgb.v.sim2 = predict(xgb.sim2, as.matrix(tmp_xg[(last_train_row+1):nrow(tmp_xg),1:ncol(tmp_xg)-1]))
+pred.xgb.v.sim2 = ifelse(pred.xgb.v.sim2 > 0.5, 1, 0)
+table(tmp_xg[(last_train_row+1):nrow(tmp_xg),ncol(tmp_xg)], pred.xgb.v.sim2)
+```
 
 ### Appendix: R code
 ```{r ref.label=knitr::all_labels(), echo = T, eval = F}
