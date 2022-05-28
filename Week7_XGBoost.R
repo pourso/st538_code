@@ -104,6 +104,7 @@ xgb.sim2 = xgboost(data = train.data, label = train.labels,
 # Fitted response labels
 pred1 = predict(xgb.sim1, train.data)
 pred.xgb.sim1 = ifelse(pred1 > 0.5, 2, 1)
+
 pred2 = predict(xgb.sim2, train.data)
 pred.xgb.sim2 = ifelse(pred2 > 0.5, 2, 1)
 # Plotting the data with fitted labels based on the model
